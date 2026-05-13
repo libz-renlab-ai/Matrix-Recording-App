@@ -13,6 +13,7 @@ import datetime as dt
 import hashlib
 import json
 import logging
+import os
 import shutil
 from pathlib import Path
 from typing import Optional
@@ -25,7 +26,14 @@ from fastapi.staticfiles import StaticFiles
 # --------------------------------------------------------------------------- config
 
 BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = Path("/home/jushi/matrix-recording")
+# Where uploaded audio + metadata live. Override with MATRIX_DATA_DIR env var.
+# Default: /home/jushi/matrix-recording on Linux server, ~/matrix-recording-data on local dev.
+_DEFAULT_DATA_DIR = (
+    "/home/jushi/matrix-recording"
+    if os.name == "posix" and Path("/home/jushi").exists()
+    else str(Path.home() / "matrix-recording-data")
+)
+DATA_DIR = Path(os.getenv("MATRIX_DATA_DIR", _DEFAULT_DATA_DIR))
 UPLOADS_DIR = DATA_DIR / "uploads"
 META_FILE = DATA_DIR / "metadata.jsonl"
 STATIC_DIR = BASE_DIR / "static"
