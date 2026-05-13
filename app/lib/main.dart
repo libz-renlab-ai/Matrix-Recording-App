@@ -229,7 +229,7 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
                   ? _EmptyState(color: cs.outline)
                   : ListView.separated(
                       itemCount: _history.length,
-                      separatorBuilder: (_, _) => const Divider(height: 1),
+                      separatorBuilder: (_, __) => const Divider(height: 1),
                       itemBuilder: (context, i) {
                         final r = _history[i];
                         return ListTile(
