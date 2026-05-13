@@ -1,13 +1,21 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:record/record.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+// Default server endpoint (overridable in app settings).
+const String _kDefaultUploadEndpoint = 'http://192.168.22.88:8000/api/upload';
+const String _kPrefsEndpointKey = 'upload_endpoint';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const MatrixRecordingApp());
 }
 
@@ -34,6 +42,8 @@ class MatrixRecordingApp extends StatelessWidget {
   }
 }
 
+enum UploadStatus { idle, queued, uploading, uploaded, failed }
+
 class _Recording {
   _Recording({
     required this.path,
@@ -45,7 +55,13 @@ class _Recording {
   final DateTime startedAt;
   final int durationMs;
 
+  UploadStatus uploadStatus = UploadStatus.idle;
+  String? uploadError;
+  double uploadProgress = 0.0;
+  String? serverId;
+
   String get filename => path.split(Platform.pathSeparator).last;
+
   int get sizeBytes {
     try {
       return File(path).lengthSync();
@@ -70,12 +86,32 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
   Duration _elapsed = Duration.zero;
   final List<_Recording> _history = [];
   String? _errorMessage;
+  String _endpoint = _kDefaultUploadEndpoint;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadEndpoint();
+  }
 
   @override
   void dispose() {
     _ticker?.cancel();
     _recorder.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadEndpoint() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _endpoint = prefs.getString(_kPrefsEndpointKey) ?? _kDefaultUploadEndpoint;
+    });
+  }
+
+  Future<void> _saveEndpoint(String value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kPrefsEndpointKey, value);
+    setState(() => _endpoint = value);
   }
 
   Future<void> _toggle() async {
@@ -136,6 +172,8 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
         durationMs: endedAt.difference(started).inMilliseconds,
       );
       setState(() => _history.insert(0, rec));
+      // Auto-queue upload.
+      unawaited(_upload(rec));
     }
   }
 
@@ -144,6 +182,67 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
     if (ok) return true;
     final status = await Permission.microphone.request();
     return status.isGranted;
+  }
+
+  Future<void> _upload(_Recording rec) async {
+    setState(() {
+      rec.uploadStatus = UploadStatus.queued;
+      rec.uploadError = null;
+      rec.uploadProgress = 0.0;
+    });
+    try {
+      final file = File(rec.path);
+      if (!file.existsSync()) {
+        throw Exception('文件丢失：${rec.path}');
+      }
+      setState(() => rec.uploadStatus = UploadStatus.uploading);
+
+      final uri = Uri.parse(_endpoint);
+      final request = http.MultipartRequest('POST', uri);
+      request.fields.addAll({
+        'client_started_at': rec.startedAt.toUtc().toIso8601String(),
+        'client_duration_ms': rec.durationMs.toString(),
+        'device': await _deviceTag(),
+      });
+      request.files.add(
+        await http.MultipartFile.fromPath('file', rec.path),
+      );
+
+      final response = await request.send().timeout(
+            const Duration(minutes: 5),
+            onTimeout: () =>
+                throw TimeoutException('上传超时（>5min），网络太慢或服务器没响应'),
+          );
+      final body = await response.stream.bytesToString();
+      if (response.statusCode == 201 || response.statusCode == 200) {
+        setState(() {
+          rec.uploadStatus = UploadStatus.uploaded;
+          rec.uploadProgress = 1.0;
+          // Try to capture server-assigned id (best effort, ignore parsing).
+          final match = RegExp(r'"id"\s*:\s*"([^"]+)"').firstMatch(body);
+          if (match != null) rec.serverId = match.group(1);
+        });
+      } else {
+        throw Exception('HTTP ${response.statusCode}: $body');
+      }
+    } on TimeoutException catch (e) {
+      setState(() {
+        rec.uploadStatus = UploadStatus.failed;
+        rec.uploadError = e.message;
+      });
+    } catch (e) {
+      setState(() {
+        rec.uploadStatus = UploadStatus.failed;
+        rec.uploadError = e.toString();
+      });
+    }
+  }
+
+  Future<String> _deviceTag() async {
+    if (kIsWeb) return 'web';
+    if (Platform.isAndroid) return 'android';
+    if (Platform.isIOS) return 'ios';
+    return Platform.operatingSystem;
   }
 
   String _fmtElapsed(Duration d) {
@@ -159,6 +258,48 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
     return '${(bytes / 1024 / 1024).toStringAsFixed(2)} MB';
   }
 
+  Future<void> _openEndpointDialog() async {
+    final controller = TextEditingController(text: _endpoint);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('上传地址'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: controller,
+              decoration: const InputDecoration(
+                labelText: 'Endpoint URL',
+                hintText: 'http://<server>:8000/api/upload',
+                border: OutlineInputBorder(),
+              ),
+              maxLines: 2,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '改完点保存。改成空 → 恢复默认。',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    if (result != null) {
+      await _saveEndpoint(result.isEmpty ? _kDefaultUploadEndpoint : result);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -166,12 +307,17 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
       appBar: AppBar(
         title: const Text('Matrix Recording'),
         centerTitle: false,
-        actions: const [
-          Padding(
+        actions: [
+          IconButton(
+            tooltip: '设置上传地址',
+            icon: const Icon(Icons.cloud_upload_outlined),
+            onPressed: _openEndpointDialog,
+          ),
+          const Padding(
             padding: EdgeInsets.only(right: 16),
             child: Center(
               child: Text(
-                'v0.0.1',
+                'v0.0.2',
                 style: TextStyle(fontSize: 12, color: Colors.grey),
               ),
             ),
@@ -189,6 +335,12 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
               onToggle: _toggle,
               color: cs.primary,
               errorColor: cs.error,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '上传到 $_endpoint',
+              style: TextStyle(fontSize: 11, color: cs.outline),
+              textAlign: TextAlign.center,
             ),
             if (_errorMessage != null) ...[
               const SizedBox(height: 12),
@@ -232,34 +384,19 @@ class _RecordingHomePageState extends State<RecordingHomePage> {
                       separatorBuilder: (_, __) => const Divider(height: 1),
                       itemBuilder: (context, i) {
                         final r = _history[i];
-                        return ListTile(
-                          leading: CircleAvatar(
-                            backgroundColor: cs.primaryContainer,
-                            child: Icon(
-                              Icons.audiotrack,
-                              color: cs.onPrimaryContainer,
-                            ),
-                          ),
-                          title: Text(
-                            DateFormat('yyyy-MM-dd HH:mm:ss')
-                                .format(r.startedAt),
-                          ),
-                          subtitle: Text(
-                            '${_fmtElapsed(Duration(milliseconds: r.durationMs))} · ${_fmtSize(r.sizeBytes)}\n${r.filename}',
-                          ),
-                          isThreeLine: true,
-                          trailing: const Chip(
-                            label: Text('本地'),
-                            visualDensity: VisualDensity.compact,
-                          ),
+                        return _RecordingTile(
+                          rec: r,
+                          fmtElapsed: _fmtElapsed,
+                          fmtSize: _fmtSize,
+                          onRetry: () => _upload(r),
                         );
                       },
                     ),
             ),
             const SizedBox(height: 8),
-            const Text(
-              'v0.0.1 · 录音本地保存，上传服务器功能待 sprint 1',
-              style: TextStyle(fontSize: 11, color: Colors.grey),
+            Text(
+              'v0.0.2 · 自动上传到服务器 + 失败可重试',
+              style: TextStyle(fontSize: 11, color: cs.outline),
               textAlign: TextAlign.center,
             ),
           ],
@@ -336,6 +473,127 @@ class _RecorderHero extends StatelessWidget {
               ),
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RecordingTile extends StatelessWidget {
+  const _RecordingTile({
+    required this.rec,
+    required this.fmtElapsed,
+    required this.fmtSize,
+    required this.onRetry,
+  });
+
+  final _Recording rec;
+  final String Function(Duration) fmtElapsed;
+  final String Function(int) fmtSize;
+  final VoidCallback onRetry;
+
+  Color _statusColor(BuildContext ctx) {
+    final cs = Theme.of(ctx).colorScheme;
+    switch (rec.uploadStatus) {
+      case UploadStatus.uploaded:
+        return Colors.green;
+      case UploadStatus.failed:
+        return cs.error;
+      case UploadStatus.uploading:
+      case UploadStatus.queued:
+        return cs.primary;
+      case UploadStatus.idle:
+        return cs.outline;
+    }
+  }
+
+  String _statusLabel() {
+    switch (rec.uploadStatus) {
+      case UploadStatus.uploaded:
+        return '✓ 已上传';
+      case UploadStatus.failed:
+        return '✗ 上传失败';
+      case UploadStatus.uploading:
+        return '↑ 上传中…';
+      case UploadStatus.queued:
+        return '… 排队中';
+      case UploadStatus.idle:
+        return '本地';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final statusColor = _statusColor(context);
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(vertical: 4),
+      leading: CircleAvatar(
+        backgroundColor: cs.primaryContainer,
+        child: Icon(
+          Icons.audiotrack,
+          color: cs.onPrimaryContainer,
+        ),
+      ),
+      title: Text(
+        DateFormat('yyyy-MM-dd HH:mm:ss').format(rec.startedAt),
+      ),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '${fmtElapsed(Duration(milliseconds: rec.durationMs))} · ${fmtSize(rec.sizeBytes)}',
+            style: const TextStyle(fontSize: 12),
+          ),
+          Text(
+            rec.filename,
+            style: TextStyle(fontSize: 11, color: cs.outline),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          if (rec.uploadError != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              rec.uploadError!,
+              style: TextStyle(fontSize: 11, color: cs.error),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ],
+      ),
+      isThreeLine: true,
+      trailing: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: statusColor.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(
+              _statusLabel(),
+              style: TextStyle(
+                fontSize: 11,
+                color: statusColor,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          if (rec.uploadStatus == UploadStatus.failed) ...[
+            const SizedBox(height: 4),
+            TextButton(
+              style: TextButton.styleFrom(
+                minimumSize: const Size(0, 28),
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                visualDensity: VisualDensity.compact,
+              ),
+              onPressed: onRetry,
+              child: const Text('重试', style: TextStyle(fontSize: 12)),
+            ),
+          ],
         ],
       ),
     );
