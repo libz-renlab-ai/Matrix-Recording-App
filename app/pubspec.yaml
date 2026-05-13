@@ -1,0 +1,22 @@
+name: matrix_recording
+description: Matrix Recording App — capture meeting audio and (eventually) auto-upload to the analysis pipeline.
+publish_to: 'none'
+version: 0.0.1+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  record: ^5.1.2
+  path_provider: ^2.1.4
+  permission_handler: ^11.3.1
+  intl: ^0.19.0
+  cupertino_icons: ^1.0.6
+
+dev_dependencies:
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
