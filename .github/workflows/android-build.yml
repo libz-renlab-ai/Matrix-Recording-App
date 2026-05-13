@@ -116,17 +116,60 @@ jobs:
           PY
           echo "::endgroup::"
 
-          echo "::group::Pin Android minSdk for record plugin"
+          echo "::group::Pin Android minSdk for record plugin + sign release with debug keystore"
           BUILD_GRADLE="$WORK/android/app/build.gradle.kts"
+          IS_KOTLIN_DSL=1
           if [ ! -f "$BUILD_GRADLE" ]; then
             BUILD_GRADLE="$WORK/android/app/build.gradle"
+            IS_KOTLIN_DSL=0
           fi
           # record plugin requires Android minSdk >= 21
           sed -i.bak -E \
             -e 's/(minSdk(Version)?\s*=?\s*)[a-zA-Z0-9._]+/\1 21/' \
             -e 's/(minSdk(Version)?\s+)flutter\.minSdkVersion/\121/' \
             "$BUILD_GRADLE"
-          grep -i "minSdk" "$BUILD_GRADLE" || true
+          # Make sure release builds are signed with the debug keystore so the
+          # release APK is installable without setting up a release keystore.
+          # Flutter create's recent templates already do this — verify or inject.
+          if ! grep -q "signingConfigs.debug\|signingConfigs.getByName" "$BUILD_GRADLE"; then
+            echo "release block missing debug signing — injecting"
+            python3 - "$BUILD_GRADLE" "$IS_KOTLIN_DSL" <<'PY'
+          import re, sys, pathlib
+          p = pathlib.Path(sys.argv[1])
+          is_kts = sys.argv[2] == "1"
+          text = p.read_text(encoding="utf-8")
+          sig = (
+              '            signingConfig = signingConfigs.getByName("debug")'
+              if is_kts else
+              '            signingConfig signingConfigs.debug'
+          )
+          # Find buildTypes { release { ... } } and insert signingConfig if missing.
+          # Strategy: find first 'release {' inside 'buildTypes' and inject.
+          if "buildTypes" not in text:
+              print("no buildTypes block — appending")
+              addition = f"""
+android {{
+    buildTypes {{
+        release {{
+{sig}
+        }}
+    }}
+}}
+"""
+              text = text + addition
+          else:
+              # Inject inside the existing release block.
+              text = re.sub(
+                  r"(release\s*\{)",
+                  rf"\1\n{sig}",
+                  text,
+                  count=1,
+              )
+          p.write_text(text, encoding="utf-8")
+          print("injected debug signing for release")
+          PY
+          fi
+          grep -i "minSdk\|signingConfig" "$BUILD_GRADLE" || true
           echo "::endgroup::"
 
           echo "Scaffold ready at: $WORK"
@@ -141,21 +184,25 @@ jobs:
         continue-on-error: true
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
-      - name: Build debug APK
-        working-directory: ${{ env.WORK_DIR }}
-        run: flutter build apk --debug
+      # Split-per-ABI: produce 3 small APKs (arm64-v8a / armeabi-v7a / x86_64)
+      # instead of one fat APK containing all 3. Each split is ~1/3 the size.
+      # We skip the fat debug build entirely to save CI time.
 
-      - name: Build release APK (unsigned)
+      - name: Build release APKs (split per ABI)
         working-directory: ${{ env.WORK_DIR }}
-        run: flutter build apk --release
+        run: flutter build apk --release --split-per-abi
 
       - name: Locate APKs
         id: locate
         working-directory: ${{ env.WORK_DIR }}
         run: |
-          echo "debug=$(ls build/app/outputs/flutter-apk/app-debug.apk 2>/dev/null || true)" >> "$GITHUB_OUTPUT"
-          echo "release=$(ls build/app/outputs/flutter-apk/app-release.apk 2>/dev/null || true)" >> "$GITHUB_OUTPUT"
+          echo "--- all APKs generated ---"
           ls -lh build/app/outputs/flutter-apk/
+          echo ""
+          echo "--- arm64 (recommended) ---"
+          if [ -f build/app/outputs/flutter-apk/app-arm64-v8a-release.apk ]; then
+            ls -lh build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          fi
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -173,14 +220,22 @@ jobs:
             echo "**Commit**: \`${GITHUB_SHA:0:7}\`"
             echo "**Branch**: \`${GITHUB_REF_NAME}\`"
             echo ""
+            echo "### Which APK to install"
+            echo ""
+            echo "**99% of modern Android phones (2017+): \`app-arm64-v8a-release.apk\`** (~17 MB)"
+            echo ""
+            echo "- Old phones (32-bit ARM): \`app-armeabi-v7a-release.apk\` (~14 MB)"
+            echo "- Emulators / x86 tablets: \`app-x86_64-release.apk\` (~18 MB)"
+            echo ""
             echo "### How to install"
             echo ""
             echo "1. Scroll to **Artifacts** at the bottom of this workflow run page"
-            echo "2. Download \`matrix-recording-android-${GITHUB_SHA:0:7}\` (a zip file)"
-            echo "3. Extract → 你会看到 \`app-debug.apk\` 和 \`app-release.apk\`"
-            echo "4. 把 \`app-debug.apk\` 传到你的 Android 手机（微信传文件 / 邮箱附件 / USB 拷贝）"
-            echo "5. 手机上点击 APK → 允许 \"安装来自此来源\" → 安装"
-            echo "6. 桌面上会出现 \"matrix_recording\" 图标"
+            echo "2. Download \`matrix-recording-android-${GITHUB_SHA:0:7}\` (zip)"
+            echo "3. Extract → pick the APK matching your phone's ABI (arm64-v8a is the safe default)"
+            echo "4. Transfer to phone (WeChat / email / USB)"
+            echo "5. On phone: tap APK → allow install from unknown source → install"
+            echo "6. App icon \"matrix_recording\" should appear"
             echo ""
-            echo "**debug APK** 大小约 50-80 MB（含调试符号）。**release APK** 更小但未签名 → 安装时手机会提示"
+            echo "All APKs are release-mode (optimized AOT, smaller, faster) and signed"
+            echo "with the debug keystore for installability."
           } >> "$GITHUB_STEP_SUMMARY"
