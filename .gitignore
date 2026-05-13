@@ -84,6 +84,23 @@ temp/
 .codex/worktrees/
 .gstack/local/
 
+# --- Python (server/) ---
+.venv-local/
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Windows quirks ---
+nul
+NUL
+
 # --- Test artifacts ---
 test-results/
 playwright-report/
