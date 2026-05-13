@@ -1,0 +1,166 @@
+name: Android APK Build
+
+# Build a debug-signed APK on every push to main / any feat branch,
+# upload as workflow artifact. User downloads artifact → installs to phone.
+#
+# Sprint 0 / V0.0.1 design:
+#   - We commit only the source files we care about (app/pubspec.yaml,
+#     app/lib/main.dart, app/android-manifest-overlay.xml).
+#   - CI generates a fresh Flutter scaffold via `flutter create`, then
+#     overlays our files. This keeps the repo clean of generated noise.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - '.github/workflows/android-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Show Flutter version
+        run: flutter --version
+
+      - name: Scaffold + overlay Matrix Recording app
+        run: |
+          set -euo pipefail
+
+          WORK="$RUNNER_TEMP/matrix_scaffold"
+          REPO_APP="$GITHUB_WORKSPACE/app"
+
+          echo "::group::Generate Flutter scaffold"
+          flutter create \
+            --project-name matrix_recording \
+            --org com.libzrenlab.matrix \
+            --platforms=android \
+            --description "Matrix Recording App" \
+            "$WORK"
+          echo "::endgroup::"
+
+          echo "::group::Overlay our source files"
+          cp "$REPO_APP/pubspec.yaml" "$WORK/pubspec.yaml"
+          cp "$REPO_APP/lib/main.dart" "$WORK/lib/main.dart"
+          echo "::endgroup::"
+
+          echo "::group::Merge AndroidManifest permissions"
+          MANIFEST="$WORK/android/app/src/main/AndroidManifest.xml"
+          python3 - "$MANIFEST" "$REPO_APP/android-manifest-overlay.xml" <<'PY'
+          import re, sys, pathlib
+
+          target = pathlib.Path(sys.argv[1])
+          overlay = pathlib.Path(sys.argv[2])
+
+          target_text = target.read_text(encoding="utf-8")
+          overlay_text = overlay.read_text(encoding="utf-8")
+
+          perms = re.findall(
+              r'<uses-permission[^/]*/>',
+              overlay_text,
+          )
+          # Insert all <uses-permission> lines right after the <manifest> opening tag.
+          def inject(match):
+              return match.group(0) + "\n    " + "\n    ".join(perms)
+
+          new_text, n = re.subn(
+              r'(<manifest[^>]*>)',
+              inject,
+              target_text,
+              count=1,
+          )
+          if n != 1:
+              raise SystemExit("could not find <manifest> opening tag")
+          target.write_text(new_text, encoding="utf-8")
+          print("injected permissions:", perms)
+          PY
+          echo "::endgroup::"
+
+          echo "::group::Pin Android minSdk for record plugin"
+          BUILD_GRADLE="$WORK/android/app/build.gradle.kts"
+          if [ ! -f "$BUILD_GRADLE" ]; then
+            BUILD_GRADLE="$WORK/android/app/build.gradle"
+          fi
+          # record plugin requires Android minSdk >= 21
+          sed -i.bak -E \
+            -e 's/(minSdk(Version)?\s*=?\s*)[a-zA-Z0-9._]+/\1 21/' \
+            -e 's/(minSdk(Version)?\s+)flutter\.minSdkVersion/\121/' \
+            "$BUILD_GRADLE"
+          grep -i "minSdk" "$BUILD_GRADLE" || true
+          echo "::endgroup::"
+
+          echo "Scaffold ready at: $WORK"
+          echo "WORK_DIR=$WORK" >> "$GITHUB_ENV"
+
+      - name: Flutter pub get
+        working-directory: ${{ env.WORK_DIR }}
+        run: flutter pub get
+
+      - name: Flutter analyze
+        working-directory: ${{ env.WORK_DIR }}
+        continue-on-error: true
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Build debug APK
+        working-directory: ${{ env.WORK_DIR }}
+        run: flutter build apk --debug
+
+      - name: Build release APK (unsigned)
+        working-directory: ${{ env.WORK_DIR }}
+        run: flutter build apk --release
+
+      - name: Locate APKs
+        id: locate
+        working-directory: ${{ env.WORK_DIR }}
+        run: |
+          echo "debug=$(ls build/app/outputs/flutter-apk/app-debug.apk 2>/dev/null || true)" >> "$GITHUB_OUTPUT"
+          echo "release=$(ls build/app/outputs/flutter-apk/app-release.apk 2>/dev/null || true)" >> "$GITHUB_OUTPUT"
+          ls -lh build/app/outputs/flutter-apk/
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: matrix-recording-android-${{ github.sha }}
+          path: ${{ env.WORK_DIR }}/build/app/outputs/flutter-apk/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Build summary
+        run: |
+          {
+            echo "## Matrix Recording — Android APK build"
+            echo ""
+            echo "**Commit**: \`${GITHUB_SHA:0:7}\`"
+            echo "**Branch**: \`${GITHUB_REF_NAME}\`"
+            echo ""
+            echo "### How to install"
+            echo ""
+            echo "1. Scroll to **Artifacts** at the bottom of this workflow run page"
+            echo "2. Download \`matrix-recording-android-${GITHUB_SHA:0:7}\` (a zip file)"
+            echo "3. Extract → 你会看到 \`app-debug.apk\` 和 \`app-release.apk\`"
+            echo "4. 把 \`app-debug.apk\` 传到你的 Android 手机（微信传文件 / 邮箱附件 / USB 拷贝）"
+            echo "5. 手机上点击 APK → 允许 \"安装来自此来源\" → 安装"
+            echo "6. 桌面上会出现 \"matrix_recording\" 图标"
+            echo ""
+            echo "**debug APK** 大小约 50-80 MB（含调试符号）。**release APK** 更小但未签名 → 安装时手机会提示"
+          } >> "$GITHUB_STEP_SUMMARY"
