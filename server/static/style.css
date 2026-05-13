@@ -71,6 +71,56 @@ h1 { margin: 0; font-size: 20px; font-weight: 700; }
 
 main { max-width: 1100px; margin: 0 auto; padding: 20px; }
 
+.uploader {
+  margin-bottom: 16px;
+  border: 2px dashed var(--border);
+  border-radius: 14px;
+  background: var(--card);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.uploader.dragover {
+  background: var(--tag-bg);
+  border-color: var(--primary);
+}
+.uploader-inner {
+  padding: 18px 22px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.uploader-icon {
+  font-size: 32px;
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--tag-bg);
+  color: var(--tag-fg);
+  border-radius: 12px;
+  flex-shrink: 0;
+}
+.uploader-text { flex: 1; min-width: 200px; }
+.uploader-text strong { font-size: 15px; }
+.uploader-pick {
+  color: var(--primary);
+  cursor: pointer;
+  text-decoration: underline;
+  font-weight: 500;
+}
+.uploader-pick input { display: none; }
+.uploader-hint {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.uploader-status {
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .filters {
   display: flex;
   gap: 8px;

@@ -151,6 +151,59 @@ $('#day').addEventListener('change', (e) => {
 });
 $('#refresh').addEventListener('click', fetchRecordings);
 
+// ---- file upload (browser-side, for local testing without phone) ----
+
+async function uploadFile(file) {
+  const status = $('#uploader-status');
+  status.textContent = `上传 ${file.name} (${fmtBytes(file.size)})…`;
+  const form = new FormData();
+  form.append('file', file);
+  form.append('client_started_at', new Date().toISOString());
+  form.append('device', 'browser-test');
+  try {
+    const res = await fetch('/api/upload', { method: 'POST', body: form });
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+    status.textContent = `✓ ${file.name} 已上传`;
+    await fetchRecordings();
+    setTimeout(() => (status.textContent = ''), 3000);
+  } catch (e) {
+    status.textContent = `✗ ${file.name}: ${e.message || e}`;
+  }
+}
+
+async function uploadFiles(files) {
+  for (const f of files) {
+    // eslint-disable-next-line no-await-in-loop
+    await uploadFile(f);
+  }
+}
+
+$('#file-input').addEventListener('change', (e) => {
+  if (e.target.files && e.target.files.length) {
+    uploadFiles(Array.from(e.target.files));
+    e.target.value = '';
+  }
+});
+
+const uploader = $('#uploader');
+['dragenter', 'dragover'].forEach((ev) => {
+  uploader.addEventListener(ev, (e) => {
+    e.preventDefault();
+    uploader.classList.add('dragover');
+  });
+});
+['dragleave', 'drop'].forEach((ev) => {
+  uploader.addEventListener(ev, (e) => {
+    e.preventDefault();
+    uploader.classList.remove('dragover');
+  });
+});
+uploader.addEventListener('drop', (e) => {
+  e.preventDefault();
+  const files = Array.from(e.dataTransfer?.files || []);
+  if (files.length) uploadFiles(files);
+});
+
 // Auto-refresh every 20s in case a phone uploads something.
 setInterval(fetchRecordings, 20000);
 

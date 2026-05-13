@@ -22,6 +22,21 @@
   </header>
 
   <main>
+    <section class="uploader" id="uploader">
+      <div class="uploader-inner">
+        <div class="uploader-icon">⬆</div>
+        <div class="uploader-text">
+          <strong>拖音频文件到这里</strong> 或
+          <label class="uploader-pick">
+            <input type="file" id="file-input" accept="audio/*,.m4a,.mp3,.wav,.ogg,.aac,.opus" multiple />
+            点击选择
+          </label>
+          <div class="uploader-hint">用于在没有手机时本地测试上传 → 显示 → 播放 整个链路</div>
+        </div>
+        <div class="uploader-status" id="uploader-status"></div>
+      </div>
+    </section>
+
     <section class="filters">
       <input type="search" id="q" placeholder="搜：标题 / 项目 / 参会人 / 设备 / 日期" />
       <select id="day">
