@@ -18,5 +18,11 @@ dependencies:
 dev_dependencies:
   flutter_lints: ^4.0.0
 
+# Pin record_platform_interface below 1.5.0 because record_linux 0.7.2 (transitive
+# from record 5.0.5) doesn't implement the new startStream API introduced in 1.5.0.
+# We only target Android but Dart compiles all platform impls.
+dependency_overrides:
+  record_platform_interface: 1.2.0
+
 flutter:
   uses-material-design: true
