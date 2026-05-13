@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 在动手之前先 brainstorm
+    url: https://github.com/libz-renlab-ai/Matrix-Recording-App/blob/main/docs/FIXEDFLOW.md
+    about: 不确定要不要开 issue？先读 FIXEDFLOW 工作流，或在本地跑 /office-hours。

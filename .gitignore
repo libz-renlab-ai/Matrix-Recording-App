@@ -1,0 +1,96 @@
+# --- Environment & secrets ---
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.keystore
+*.jks
+secrets/
+service-account*.json
+
+# --- OS / Editor ---
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+.vscode/
+.idea/
+*.iml
+*.code-workspace
+
+# --- Node / JS toolchain ---
+node_modules/
+.npm/
+.yarn/
+.pnpm-store/
+*.tsbuildinfo
+.cache/
+.parcel-cache/
+.next/
+dist/
+build/
+out/
+coverage/
+
+# --- Flutter / Dart ---
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+pubspec.lock.bak
+
+# --- iOS ---
+ios/Pods/
+ios/build/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+ios/Runner.xcworkspace/xcuserdata/
+ios/Runner.xcodeproj/project.xcworkspace/xcuserdata/
+ios/Runner.xcodeproj/xcuserdata/
+*.xcuserstate
+DerivedData/
+
+# --- Android ---
+android/.gradle/
+android/build/
+android/app/build/
+android/captures/
+android/key.properties
+android/local.properties
+*.apk
+*.aab
+*.aar
+
+# --- React Native (if chosen) ---
+.expo/
+.expo-shared/
+metro.config.local.js
+
+# --- Logs & temp ---
+*.log
+logs/
+tmp/
+temp/
+.tmp/
+
+# --- Agent / local state (do not commit) ---
+.teamagent/
+.claude/local/
+.claude/sessions/
+.codex/worktrees/
+.gstack/local/
+
+# --- Test artifacts ---
+test-results/
+playwright-report/
+screenshots/
+*.har
+
+# --- Backup files ---
+*.bak
+*.orig
+*~

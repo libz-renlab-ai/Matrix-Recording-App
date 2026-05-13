@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Matrix Recording App — pre-commit hook
+# 设计原则：警告优先，阻塞只用于显而易见的灾难（secret / 大文件）。
+# Escape: 设 MATRIX_PRECOMMIT_SKIP=1 跳过
+
+set -u
+
+if [ "${MATRIX_PRECOMMIT_SKIP:-}" = "1" ]; then
+  exit 0
+fi
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+STAGED="$(git diff --cached --name-only --diff-filter=ACM)"
+
+if [ -z "$STAGED" ]; then
+  exit 0
+fi
+
+FAIL=0
+
+# --- 1. 拒绝明显的 secret 模式 ---
+#   GitHub 已开启 push protection，但本地先拦一道避免白白 round-trip
+SECRET_PATTERNS='(gh[pousr]_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN (RSA|OPENSSH|EC) PRIVATE KEY-----|"AIza[0-9A-Za-z\-_]{35}")'
+HITS=$(echo "$STAGED" | xargs -I{} sh -c 'git diff --cached -- "{}" 2>/dev/null | grep -E "^\+" | grep -E "'"$SECRET_PATTERNS"'" && echo "  in: {}"' 2>/dev/null || true)
+if [ -n "$HITS" ]; then
+  echo "[pre-commit] ⛔ 疑似 secret 出现在 staged diff:" >&2
+  echo "$HITS" >&2
+  echo "[pre-commit] 撤回方法: git reset HEAD <file> 或者 git restore --staged <file>" >&2
+  FAIL=1
+fi
+
+# --- 2. 警告超大文件（> 5 MB） ---
+LARGE=$(echo "$STAGED" | xargs -I{} sh -c 'if [ -f "{}" ]; then sz=$(wc -c <"{}"); if [ "$sz" -gt 5242880 ]; then echo "  $sz bytes: {}"; fi; fi' 2>/dev/null || true)
+if [ -n "$LARGE" ]; then
+  echo "[pre-commit] ⚠️  staged 中有超过 5 MB 的文件:" >&2
+  echo "$LARGE" >&2
+  echo "[pre-commit] 如果是录音 / 视频 / build 产物，建议改用 Git LFS 或挪出仓库。" >&2
+  echo "[pre-commit] 确认要 commit 设 MATRIX_PRECOMMIT_SKIP=1。" >&2
+  FAIL=1
+fi
+
+# --- 3. 警告：本地 .teamagent / .codex/worktrees / .env 被 staged ---
+LOCAL_STATE=$(echo "$STAGED" | grep -E '^(\.teamagent/|\.codex/worktrees/|\.env$|\.env\.[^x])' || true)
+if [ -n "$LOCAL_STATE" ]; then
+  echo "[pre-commit] ⛔ 本地状态文件被 staged，应该在 .gitignore 里:" >&2
+  echo "$LOCAL_STATE" >&2
+  FAIL=1
+fi
+
+if [ "$FAIL" = "1" ]; then
+  exit 1
+fi
+
+exit 0
