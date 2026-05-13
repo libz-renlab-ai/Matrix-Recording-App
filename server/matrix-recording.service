@@ -1,0 +1,20 @@
+[Unit]
+Description=Matrix Recording Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jushi
+WorkingDirectory=/home/jushi/matrix-recording/server
+ExecStart=/home/jushi/matrix-recording/server/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000 --log-level info
+Restart=on-failure
+RestartSec=3s
+StandardOutput=append:/home/jushi/matrix-recording/server.log
+StandardError=append:/home/jushi/matrix-recording/server.log
+
+# Hardening (light — the user explicitly does not care about privacy)
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

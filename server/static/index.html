@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>Matrix Recording — 会议录音</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <div class="bar">
+      <div>
+        <h1>Matrix Recording</h1>
+        <div class="sub">会议录音 → 分析管道 · server v0.0.2</div>
+      </div>
+      <div class="stats" id="stats">
+        <span class="badge" id="count">…</span>
+        <span class="badge" id="size">…</span>
+        <span class="badge" id="disk">…</span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="filters">
+      <input type="search" id="q" placeholder="搜：标题 / 项目 / 参会人 / 设备 / 日期" />
+      <select id="day">
+        <option value="">所有日期</option>
+      </select>
+      <button id="refresh">刷新</button>
+    </section>
+
+    <section id="list" class="list">
+      <div class="empty">加载中…</div>
+    </section>
+
+    <footer>
+      <a href="/api/health" target="_blank">health</a> ·
+      <a href="/api/recordings" target="_blank">api/recordings</a>
+    </footer>
+  </main>
+
+  <template id="card">
+    <article class="card">
+      <header class="card-head">
+        <div class="card-title">
+          <span class="title-text"></span>
+          <span class="title-id"></span>
+        </div>
+        <div class="card-meta">
+          <span class="badge meta-time"></span>
+          <span class="badge meta-dur"></span>
+          <span class="badge meta-size"></span>
+          <span class="badge meta-device"></span>
+        </div>
+      </header>
+      <div class="card-tags">
+        <span class="tag project"></span>
+        <span class="tag participants"></span>
+      </div>
+      <audio class="player" controls preload="none"></audio>
+      <div class="card-actions">
+        <a class="action download" target="_blank">下载</a>
+        <button class="action delete">删除</button>
+        <span class="action-status"></span>
+      </div>
+    </article>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>
