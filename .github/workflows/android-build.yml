@@ -138,33 +138,14 @@ jobs:
           p = pathlib.Path(sys.argv[1])
           is_kts = sys.argv[2] == "1"
           text = p.read_text(encoding="utf-8")
-          sig = (
-              '            signingConfig = signingConfigs.getByName("debug")'
-              if is_kts else
-              '            signingConfig signingConfigs.debug'
-          )
-          # Find buildTypes { release { ... } } and insert signingConfig if missing.
-          # Strategy: find first 'release {' inside 'buildTypes' and inject.
-          if "buildTypes" not in text:
-              print("no buildTypes block — appending")
-              addition = f"""
-android {{
-    buildTypes {{
-        release {{
-{sig}
-        }}
-    }}
-}}
-"""
-              text = text + addition
-          else:
-              # Inject inside the existing release block.
-              text = re.sub(
-                  r"(release\s*\{)",
-                  rf"\1\n{sig}",
-                  text,
-                  count=1,
-              )
+          sig = ('            signingConfig = signingConfigs.getByName("debug")'
+                 if is_kts else
+                 '            signingConfig signingConfigs.debug')
+          # flutter create always generates a release { } block in buildTypes.
+          # Inject signingConfig as the first line inside that block.
+          text, n = re.subn(r"(release\s*\{)", r"\1\n" + sig, text, count=1)
+          if n != 1:
+              raise SystemExit("could not find release { block")
           p.write_text(text, encoding="utf-8")
           print("injected debug signing for release")
           PY
